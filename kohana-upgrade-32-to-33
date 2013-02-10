@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+#
+# Helper script to upgrade from Kohana 3.2.x to Kohana 3.3.x
+#
+# This script is designed to do bulk changes to your codebase that can
+# easily be automated, changes that would otherwise have the potential
+# to take a very long time for a large project. It does not provide a
+# fully automated migration, and it is highly recommended that you read
+# the official Kohana 3.3 upgrade guide before running this script.
+#
+# http://kohanaframework.org/3.3/guide/kohana/upgrading
+#
+# There will be things that get missed, or where the regex used will be
+# overly aggressive. Therefore it is highly recommend that you run this
+# script on a project that is tracked via some kind of RCS, e.g. Git.
+# This will let you see the changes that the script made, and you can
+# amend as required.
+#
+# This script will not migrate the following:
+#
+# - Manual response status to HTTP exceptions
+# - New redirect API outside of a controller
+# - Query Builder Identifier Escaping (apart from COUNT("*"))
+# - Route filters
+#
+# Caveats:
+# - It will not change the case of classes where they are used, e.g.
+#   `$foo = new foo` will not change to `$foo = new Foo`.
+# - When a class is extended by another class, or where it implements
+#   an interface, the case of that extending class or interface will
+#   not be changed.
+#
+# HOW TO RUN
+# =====================================================================
+# The script requires one argument, which is the path to a "classes"
+# directory that it will process, e.g.
+#
+# ./kohana-upgrade-32-to-33 ./application/classes
+# =====================================================================
+#
+# @author Alex Cartwright <alexc223@gmail.com>
+
+if [[ ! -d "$1" ]]; then
+	echo "Please specify a 'classes' directory (that exists), e.g. '$0 ./application/classes'" 1>&2
+	exit 1
+fi
+
+target=$(readlink -f "$1")/ # Trailing slash is required
+
+for src in $(find "$target" -depth -not -path "$target"); do
+	directory=$(dirname "$src")
+	filename=$(basename "$src")
+
+	mv -T "$src" "$directory/${filename^}"
+done
+
+for file in $(find "$target" -type f -name "*.php"); do
+	filepath=$(readlink -f "$file")
+	classname=$(echo ${filepath:${#target}:-4} | tr / _)
+
+	sed -i \
+		-e 's/\(html\|http\|url\|utf8\|db\|orm\)::/\U\1::/gi' \
+		-e 's/http_/HTTP_/gi' \
+		-e 's/_http/_HTTP/gi' \
+		-e 's/->request->redirect(/->redirect(/gi' \
+		-e "s/'COUNT(\"\*\")'/DB::expr('COUNT(*)')/gi" \
+		-e "s/ORM::factory(\(['\"]\)\([[:lower:]]\)/ORM::factory(\1\u\2/; :a s/\(ORM::factory(['\"][^'\")]*_\)\([[:lower:]]\)/\1\u\2/; ta" \
+		-e '/->check_cache(/ s/,[^)]*//gi' \
+		-e 's/this->response->check_cache/this->check_cache/gi' \
+		-e "s/class\s*$classname/class $classname/i" \
+		"$file"
+done
+
+exit 0
